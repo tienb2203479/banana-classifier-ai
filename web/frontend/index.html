@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BananaID Premium - Giao diện nghệ thuật</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: linear-gradient(135deg, #fef9c3 0%, #fff7ed 100%);
+            min-height: 100vh;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
+        }
+
+        .banana-gradient {
+            background: linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%);
+        }
+
+        .floating {
+            animation: floating 3s ease-in-out infinite;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @keyframes floating {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+    </style>
+</head>
+<body class="p-3 md:p-5">
+
+    <div class="fixed top-[-10%] left-[-10%] w-64 h-64 bg-yellow-200 rounded-full blur-[100px] opacity-50 z-[-1]"></div>
+    <div class="fixed bottom-[-10%] right-[-10%] w-96 h-96 bg-orange-200 rounded-full blur-[100px] opacity-50 z-[-1]"></div>
+
+    <div class="max-w-6xl mx-auto">
+        <header class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-6">
+            <div class="flex items-center gap-4">
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 flex items-center justify-center shadow-xl rotate-[-10deg] ring-4 ring-white/70 text-3xl">
+                    <span class="drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]">🍌</span>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight text-gray-800 leading-none">Banana<span class="text-yellow-600 underline decoration-wavy">ID</span></h1>
+                    <p class="text-xs md:text-sm text-gray-500 font-semibold mt-1">Nhận diện chuối đa nhiệm với mô hình EfficientNet-B4</p>
+                </div>
+            </div>
+            <div class="flex gap-2 justify-start md:justify-end">
+                <button id="tabHome" type="button" class="glass px-5 py-2 rounded-full text-sm font-bold text-gray-800 bg-white/90">Trang chủ</button>
+                <button id="tabHistory" type="button" class="glass px-5 py-2 rounded-full text-sm font-bold text-gray-500">Lịch sử</button>
+            </div>
+        </header>
+
+        <section id="homeSection">
+
+        <div class="grid lg:grid-cols-2 gap-6 items-stretch">
+
+            <div class="space-y-6 h-full">
+                <div class="glass p-7 rounded-[2.5rem] relative overflow-hidden group min-h-[500px] h-full">
+                    <div class="absolute top-0 left-0 w-full h-2 banana-gradient opacity-0 group-hover:opacity-100 transition"></div>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6">Bắt đầu quét</h2>
+
+                    <label for="fileInput" class="border-2 border-dashed border-yellow-200 rounded-[2rem] p-8 md:p-10 text-center flex flex-col items-center gap-4 transition-all hover:border-yellow-400 hover:bg-yellow-50/50 cursor-pointer">
+                        <input id="fileInput" type="file" accept="image/png,image/jpeg" capture="environment" class="hidden" />
+                        <img id="previewImage" alt="Preview" class="hidden w-full h-[320px] object-cover rounded-[1.5rem]" />
+                        <div id="uploadPrompt" class="space-y-4">
+                            <div class="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center floating mx-auto">
+                                <i class="fas fa-cloud-upload-alt text-3xl text-yellow-600"></i>
+                            </div>
+                            <div class="space-y-1">
+                                <p class="font-bold text-gray-700 text-lg">Chạm để tải ảnh</p>
+                                <p class="text-sm text-gray-400 leading-relaxed">Hãy để AI giúp bạn hiểu về <br>chất lượng trái cây</p>
+                            </div>
+                        </div>
+                    </label>
+
+                    <div class="mt-4 flex gap-3">
+                        <button id="predictBtn" class="flex-1 banana-gradient text-white py-4 rounded-[1.2rem] font-bold shadow-lg hover:shadow-yellow-200/50 transition transform hover:scale-[1.02]" type="button">
+                            NHẬN DẠNG
+                        </button>
+                    </div>
+
+                    <p id="status" class="mt-3 text-sm text-gray-500 font-semibold"></p>
+                </div>
+            </div>
+
+            <div class="h-full">
+                <div id="result" class="glass p-7 md:p-8 rounded-[2.5rem] space-y-6 min-h-[500px] h-full">
+                    <div class="h-full min-h-[430px] flex flex-col items-center justify-center text-center text-gray-500">
+                        <div class="w-24 h-24 rounded-[28px] bg-gradient-to-br from-yellow-200 to-orange-300 flex items-center justify-center shadow-xl mb-4 rotate-[-8deg] ring-4 ring-white/70 text-5xl">
+                            <span class="drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]">🍌</span>
+                        </div>
+                        <p class="text-2xl font-bold text-gray-700">Sẵn sàng nhận dạng</p>
+                        <p class="mt-2 text-sm">Tải ảnh ở card bên trái rồi bấm "NHẬN DẠNG" để xem kết quả chi tiết.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        </section>
+
+        <section id="historySection" class="hidden">
+        <div class="mt-2 glass p-6 rounded-[2rem]">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+                <h3 class="text-xl font-bold text-gray-800">Lịch sử phiên truy cập</h3>
+                <p class="text-sm text-gray-400">Chỉ lưu trong lần truy cập hiện tại</p>
+            </div>
+            <div id="history" class="mt-4 text-gray-500 font-semibold">Chưa có lịch sử</div>
+        </div>
+        <footer class="mt-12 text-center text-gray-400 text-sm font-medium">
+            Thiết kế tối giản cho trải nghiệm tối đa • BananaID 2026
+        </footer>
+        </section>
+    </div>
+
+    <script src="/assets/app.js?v=4"></script>
+</body>
+</html>

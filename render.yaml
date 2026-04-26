@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: banana-ai-web
+    runtime: python
+    plan: free
+    autoDeploy: true
+    buildCommand: pip install --upgrade pip ; pip install -r requirements-web.txt
+    startCommand: python -m uvicorn app.main:app --app-dir web/backend --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: MAX_UPLOAD_MB
+        value: "8"
+      - key: BANANA_CHECKPOINT
+        value: outputs/efficientnet_b4_v3/best.pt
+      - key: MYSQL_HOST
+        sync: false
+      - key: MYSQL_PORT
+        value: "3306"
+      - key: MYSQL_USER
+        sync: false
+      - key: MYSQL_PASSWORD
+        sync: false
+      - key: MYSQL_DATABASE
+        value: banana_ai

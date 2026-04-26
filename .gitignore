@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Large datasets and training artifacts
+dataset_train/
+dataset_demo/image/
+data/image/
+data/images/
+outputs/
+models/
+logs/
+
+# Runtime storage
+web/backend/storage/uploads/
+
+# Optional local files
+*.log
