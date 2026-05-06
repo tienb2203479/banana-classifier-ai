@@ -7,10 +7,12 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from io import BytesIO
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 
 from app.core.banana_info import BANANA_TYPE_INFO, DEFAULT_BANANA_INFO
 from app.core.database import DatabaseManager
@@ -111,9 +113,31 @@ def startup_event() -> None:
 
 
 def _validate_upload(file: UploadFile) -> None:
+    """Validate file is a real PNG or JPEG image."""
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Only jpg/jpeg/png files are supported")
+        raise HTTPException(status_code=400, detail="Only PNG/JPEG files are supported")
+    
+    # Verify file is actually a valid image
+    try:
+        content = file.file.read()
+        file.file.seek(0)  # Reset for later reading
+        
+        image = Image.open(BytesIO(content))
+        image.load()  # Verify image data is valid
+        
+        if image.format not in {"JPEG", "PNG"}:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid image format: {image.format}. Only PNG and JPEG are supported."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=400, 
+            detail="File is not a valid image. Please upload a real PNG or JPEG file."
+        )
 
 
 def _save_upload(file: UploadFile) -> Path:
@@ -194,25 +218,31 @@ def predict(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
 
 @app.get("/api/history")
 def get_history(request: Request) -> dict[str, Any]:
+    def _norm(text: str) -> str:
+        value = unicodedata.normalize("NFD", str(text).strip().lower())
+        value = value.replace("đ", "d")
+        return "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
+
+    def _add_reference_image(item: dict[str, Any]) -> None:
+        if "reference_image_url" not in item or not item["reference_image_url"]:
+            loai_label = item.get("predictions", {}).get("loai", {}).get("label", "")
+            dang_label = item.get("predictions", {}).get("dang", {}).get("label", "")
+            trang_thai_label = item.get("predictions", {}).get("trang_thai", {}).get("label", "")
+            combo_key = f"{_norm(loai_label)}|{_norm(dang_label)}|{_norm(trang_thai_label)}"
+            item["reference_image_url"] = REFERENCE_IMAGE_MAP.get(combo_key) or REFERENCE_IMAGE_MAP.get(_norm(loai_label))
+
     if database.enabled:
         try:
             history = database.fetch_history(request.state.sid)
             if history:
-                def _norm(text: str) -> str:
-                    value = unicodedata.normalize("NFD", str(text).strip().lower())
-                    value = value.replace("đ", "d")
-                    return "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
-
                 for item in history:
-                    loai_label = item.get("predictions", {}).get("loai", {}).get("label", "")
-                    dang_label = item.get("predictions", {}).get("dang", {}).get("label", "")
-                    trang_thai_label = item.get("predictions", {}).get("trang_thai", {}).get("label", "")
-                    combo_key = f"{_norm(loai_label)}|{_norm(dang_label)}|{_norm(trang_thai_label)}"
-                    item["reference_image_url"] = REFERENCE_IMAGE_MAP.get(combo_key) or REFERENCE_IMAGE_MAP.get(_norm(loai_label))
+                    _add_reference_image(item)
                 return {"items": history, "session_only": False}
         except Exception:
             pass
     history = _ensure_session_history(request.state.sid)
+    for item in history:
+        _add_reference_image(item)
     return {"items": history, "session_only": True}
 
 
@@ -229,6 +259,103 @@ def clear_history(request: Request) -> dict[str, Any]:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(FRONTEND_ROOT / "index.html")
+
+@app.get("/admin")
+def admin() -> FileResponse:
+    return FileResponse(FRONTEND_ROOT / "admin.html")
+
+
+@app.get("/api/admin/predictions")
+def admin_predictions(start_time: str | None = None, end_time: str | None = None) -> dict[str, Any]:
+    if not database.enabled:
+        return {"items": []}
+    try:
+        items = database.fetch_all_predictions(start_time=start_time, end_time=end_time)
+        return {"items": items}
+    except Exception:
+        return {"items": []}
+
+
+@app.get("/api/admin/bananas")
+def admin_bananas() -> dict[str, Any]:
+    if not database.enabled:
+        return {"items": []}
+    try:
+        items = database.fetch_all_bananas()
+        return {"items": items}
+    except Exception:
+        return {"items": []}
+
+
+@app.get("/api/admin/banana/{b_id}")
+def admin_banana_detail(b_id: int) -> dict[str, Any]:
+    if not database.enabled:
+        raise HTTPException(status_code=503, detail="Database not enabled")
+    try:
+        item = database.fetch_banana(b_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Banana not found")
+        return {"item": item}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.put("/api/admin/banana/{b_id}")
+def update_banana(b_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    if not database.enabled:
+        raise HTTPException(status_code=503, detail="Database not enabled")
+    try:
+        database.update_banana(b_id, payload)
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/admin/banana")
+def create_banana(payload: dict[str, Any]) -> dict[str, Any]:
+    if not database.enabled:
+        raise HTTPException(status_code=503, detail="Database not enabled")
+    try:
+        b_id = database.create_banana(payload)
+        return {"ok": True, "b_id": b_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400 if "required" in str(exc).lower() else 500, detail=str(exc)) from exc
+
+
+@app.delete("/api/admin/banana/{b_id}")
+def delete_banana(b_id: int) -> dict[str, Any]:
+    if not database.enabled:
+        raise HTTPException(status_code=503, detail="Database not enabled")
+    try:
+        database.delete_banana(b_id)
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/export/stats")
+def export_stats(start_time: str | None = None, end_time: str | None = None, min_confidence: float = 0.7) -> dict[str, Any]:
+    if not database.enabled:
+        return {"count": 0, "size_mb": 0.0}
+    try:
+        count, size_bytes = database.get_export_stats(start_time=start_time, end_time=end_time, min_confidence=min_confidence)
+        return {"count": count, "size_mb": size_bytes / (1024 * 1024)}
+    except Exception:
+        return {"count": 0, "size_mb": 0.0}
+
+
+@app.get("/api/admin/export/download")
+def export_download(start_time: str | None = None, end_time: str | None = None, min_confidence: float = 0.7) -> FileResponse:
+    if not database.enabled:
+        raise HTTPException(status_code=503, detail="Database not enabled")
+    try:
+        zip_path = database.export_predictions_zip(start_time=start_time, end_time=end_time, min_confidence=min_confidence)
+        return FileResponse(zip_path, media_type="application/zip", filename=f"banana_dataset_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.zip")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_ROOT), name="uploads")

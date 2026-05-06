@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import sys
+import tempfile
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -10,10 +14,12 @@ from typing import Any, Iterator
 import mysql.connector
 from mysql.connector.pooling import MySQLConnectionPool
 
-from app.core.banana_info import BANANA_TYPE_INFO
-from src.banana_multitask.utils import normalize_text
+from app.core.banana_info import BANANA_TYPE_INFO, DEFAULT_BANANA_INFO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.banana_multitask.utils import normalize_text
 
 
 def _load_env_files() -> None:
@@ -36,6 +42,37 @@ _load_env_files()
 
 def _normalize_label(value: str) -> str:
     return normalize_text(value)
+
+
+def _banana_profile(name: str | None) -> dict[str, Any]:
+    profile = BANANA_TYPE_INFO.get(name or "", DEFAULT_BANANA_INFO)
+    return {
+        "ten_goi_khac": profile.get("ten_goi_khac", DEFAULT_BANANA_INFO["ten_goi_khac"]),
+        "dac_diem": profile.get("dac_diem", DEFAULT_BANANA_INFO["dac_diem"]),
+        "dinh_duong": profile.get("dinh_duong", DEFAULT_BANANA_INFO["dinh_duong"]),
+        "calo_uoc_luong": profile.get("calo_uoc_luong", DEFAULT_BANANA_INFO["calo_uoc_luong"]),
+        "dinh_duong_highlights": list(profile.get("dinh_duong_highlights", DEFAULT_BANANA_INFO["dinh_duong_highlights"])),
+        "do_ngot": profile.get("do_ngot", DEFAULT_BANANA_INFO["do_ngot"]),
+        "goi_y_su_dung": profile.get("goi_y_su_dung", DEFAULT_BANANA_INFO["goi_y_su_dung"]),
+        "bao_quan": profile.get("bao_quan", DEFAULT_BANANA_INFO["bao_quan"]),
+    }
+
+
+def _normalize_datetime_filter(value: str | None, *, end_of_day: bool = False) -> str | None:
+    if not value:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    if "T" in text:
+        text = text.replace("T", " ", 1)
+
+    if len(text) == 10:
+        text = f"{text} {'23:59:59' if end_of_day else '00:00:00'}"
+
+    return text
 
 
 class DatabaseManager:
@@ -216,6 +253,10 @@ class DatabaseManager:
             raise RuntimeError("MySQL is not configured")
         conn = self._pool.get_connection()
         try:
+            try:
+                conn.set_charset_collation("utf8mb4", "utf8mb4_unicode_ci")
+            except Exception:
+                pass
             yield conn
         finally:
             conn.close()
@@ -385,3 +426,381 @@ class DatabaseManager:
             )
             cur.execute("DELETE FROM image WHERE session_id = %s", (session_id,))
             conn.commit()
+
+    def fetch_all_predictions(self, start_time: str | None = None, end_time: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+
+        start_time = _normalize_datetime_filter(start_time)
+        end_time = _normalize_datetime_filter(end_time, end_of_day=True)
+
+        where_clause = ""
+        params: list[Any] = []
+        if start_time:
+            where_clause += " WHERE i.img_upload_time >= %s"
+            params.append(start_time)
+        if end_time:
+            where_clause += " AND" if where_clause else " WHERE"
+            where_clause += " i.img_upload_time <= %s"
+            params.append(end_time)
+
+        query = f"""
+                SELECT
+                    i.img_path, i.img_upload_time, p.p_id, p.structure_type,
+                    p.ripeness_level, p.type_confidence, p.can_review, b.b_name
+                FROM prediction p
+                INNER JOIN image i ON i.img_id = p.img_id
+                LEFT JOIN banana_type b ON b.b_id = p.b_id
+                {where_clause}
+                ORDER BY p.p_id DESC
+                LIMIT %s
+                """
+
+        with self.connection() as conn:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(query, (*params, limit))
+            rows = cur.fetchall()
+
+        result = []
+        for row in rows:
+            try:
+                image_path = Path(str(row["img_path"]))
+                image_url = f"/uploads/{image_path.parent.name}/{image_path.name}"
+            except Exception:
+                image_url = ""
+
+            result.append({
+                "img_id": row["p_id"],
+                "image_url": image_url,
+                "banana_name": row["b_name"] or "Unknown",
+                "structure_type": row["structure_type"] or "",
+                "ripeness_level": row["ripeness_level"] or "",
+                "type_confidence": float(row["type_confidence"] or 0.0),
+                "can_review": bool(row["can_review"]),
+                "created_at": row["img_upload_time"].isoformat() if row["img_upload_time"] else "",
+            })
+        return result
+
+    def fetch_all_bananas(self) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+
+        with self.connection() as conn:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                """
+                SELECT
+                    b.b_id, b.b_name, b.b_scientific_name, b.description, b.origin,
+                    b.taste, b.recommended_usage, b.best_for, b.storage_tip, b.created_at,
+                    n.calories_per_100g, n.carbs_g, n.sugar_g, n.fiber_g,
+                    n.protein_g, n.fat_g, n.vitamin_c_mg, n.potassium_mg,
+                    (
+                        SELECT COUNT(*)
+                        FROM prediction p
+                        WHERE p.b_id = b.b_id
+                    ) AS prediction_count
+                FROM banana_type b
+                LEFT JOIN nutrition n ON n.b_id = b.b_id
+                ORDER BY b.b_id DESC
+                """
+            )
+            rows = cur.fetchall()
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            profile = _banana_profile(row.get("b_name"))
+            result.append({
+                **row,
+                **profile,
+            })
+        return result
+
+    def fetch_banana(self, b_id: int) -> dict[str, Any] | None:
+        if not self.enabled:
+            return None
+
+        with self.connection() as conn:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                """
+                SELECT
+                    b.b_id, b.b_name, b.b_scientific_name, b.description, b.origin,
+                    b.taste, b.recommended_usage, b.best_for, b.storage_tip, b.created_at,
+                    n.calories_per_100g, n.carbs_g, n.sugar_g, n.fiber_g,
+                    n.protein_g, n.fat_g, n.vitamin_c_mg, n.potassium_mg
+                FROM banana_type b
+                LEFT JOIN nutrition n ON n.b_id = b.b_id
+                WHERE b.b_id = %s
+                """,
+                (b_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                **row,
+                **_banana_profile(row.get("b_name")),
+            }
+
+    def create_banana(self, data: dict[str, Any]) -> int:
+        if not self.enabled:
+            raise RuntimeError("Database not enabled")
+
+        required_name = str(data.get("b_name") or "").strip()
+        if not required_name:
+            raise ValueError("Banana name is required")
+
+        banana_values = {
+            "b_name": required_name,
+            "b_scientific_name": data.get("b_scientific_name"),
+            "description": data.get("description"),
+            "origin": data.get("origin"),
+            "taste": data.get("taste"),
+            "recommended_usage": data.get("recommended_usage"),
+            "best_for": data.get("best_for"),
+            "storage_tip": data.get("storage_tip"),
+        }
+
+        nutrition_values = {
+            "calories_per_100g": data.get("calories_per_100g"),
+            "carbs_g": data.get("carbs_g"),
+            "sugar_g": data.get("sugar_g"),
+            "fiber_g": data.get("fiber_g"),
+            "protein_g": data.get("protein_g"),
+            "fat_g": data.get("fat_g"),
+            "vitamin_c_mg": data.get("vitamin_c_mg"),
+            "potassium_mg": data.get("potassium_mg"),
+        }
+
+        with self.connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO banana_type
+                    (b_name, b_scientific_name, description, origin, taste, recommended_usage, best_for, storage_tip)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    banana_values["b_name"],
+                    banana_values["b_scientific_name"],
+                    banana_values["description"],
+                    banana_values["origin"],
+                    banana_values["taste"],
+                    banana_values["recommended_usage"],
+                    banana_values["best_for"],
+                    banana_values["storage_tip"],
+                ),
+            )
+            b_id = int(cur.lastrowid)
+
+            has_nutrition = any(value not in (None, "") for value in nutrition_values.values())
+            if has_nutrition:
+                cur.execute(
+                    """
+                    INSERT INTO nutrition
+                        (b_id, calories_per_100g, carbs_g, sugar_g, fiber_g, protein_g, fat_g, vitamin_c_mg, potassium_mg)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        b_id,
+                        nutrition_values["calories_per_100g"],
+                        nutrition_values["carbs_g"],
+                        nutrition_values["sugar_g"],
+                        nutrition_values["fiber_g"],
+                        nutrition_values["protein_g"],
+                        nutrition_values["fat_g"],
+                        nutrition_values["vitamin_c_mg"],
+                        nutrition_values["potassium_mg"],
+                    ),
+                )
+
+            conn.commit()
+            return b_id
+
+    def update_banana(self, b_id: int, data: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+
+        allowed_fields = {
+            "b_name": "b_name",
+            "b_scientific_name": "b_scientific_name",
+            "description": "description",
+            "origin": "origin",
+            "taste": "taste",
+            "recommended_usage": "recommended_usage",
+            "best_for": "best_for",
+            "storage_tip": "storage_tip",
+        }
+
+        nutrition_fields = {
+            "calories_per_100g": "calories_per_100g",
+            "carbs_g": "carbs_g",
+            "sugar_g": "sugar_g",
+            "fiber_g": "fiber_g",
+            "protein_g": "protein_g",
+            "fat_g": "fat_g",
+            "vitamin_c_mg": "vitamin_c_mg",
+            "potassium_mg": "potassium_mg",
+        }
+
+        updates = []
+        values = []
+        for key, col in allowed_fields.items():
+            if key in data:
+                updates.append(f"{col} = %s")
+                values.append(data[key] if data[key] != "" else None)
+
+        if not updates:
+            values = []
+
+        nutrition_updates = []
+        nutrition_values = []
+        for key, col in nutrition_fields.items():
+            if key in data:
+                nutrition_updates.append(f"{col} = %s")
+                value = data[key]
+                nutrition_values.append(value if value not in ("", None) else None)
+
+        with self.connection() as conn:
+            cur = conn.cursor()
+            if updates:
+                values.append(b_id)
+                query = f"UPDATE banana_type SET {', '.join(updates)} WHERE b_id = %s"
+                cur.execute(query, values)
+
+            if nutrition_updates:
+                cur.execute("SELECT n_id FROM nutrition WHERE b_id = %s", (b_id,))
+                row = cur.fetchone()
+                if row:
+                    nutrition_values.append(b_id)
+                    query = f"UPDATE nutrition SET {', '.join(nutrition_updates)} WHERE b_id = %s"
+                    cur.execute(query, nutrition_values)
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO nutrition
+                            (b_id, calories_per_100g, carbs_g, sugar_g, fiber_g, protein_g, fat_g, vitamin_c_mg, potassium_mg)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            b_id,
+                            data.get("calories_per_100g"),
+                            data.get("carbs_g"),
+                            data.get("sugar_g"),
+                            data.get("fiber_g"),
+                            data.get("protein_g"),
+                            data.get("fat_g"),
+                            data.get("vitamin_c_mg"),
+                            data.get("potassium_mg"),
+                        ),
+                    )
+
+            conn.commit()
+
+    def delete_banana(self, b_id: int) -> None:
+        if not self.enabled:
+            return
+
+        with self.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM banana_type WHERE b_id = %s", (b_id,))
+            conn.commit()
+
+    def get_export_stats(self, start_time: str | None = None, end_time: str | None = None, min_confidence: float = 0.7) -> tuple[int, int]:
+        if not self.enabled:
+            return 0, 0
+
+        start_time = _normalize_datetime_filter(start_time)
+        end_time = _normalize_datetime_filter(end_time, end_of_day=True)
+
+        where_clause = "WHERE p.type_confidence >= %s"
+        params: list[Any] = [min_confidence]
+
+        if start_time:
+            where_clause += " AND i.img_upload_time >= %s"
+            params.append(start_time)
+        if end_time:
+            where_clause += " AND i.img_upload_time <= %s"
+            params.append(end_time)
+
+        with self.connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                SELECT COUNT(*) as cnt
+                FROM prediction p
+                INNER JOIN image i ON i.img_id = p.img_id
+                {where_clause}
+                """,
+                params,
+            )
+            row = cur.fetchone()
+            count = int(row[0] if row else 0)
+
+            cur.execute(
+                f"""
+                SELECT i.img_path
+                FROM prediction p
+                INNER JOIN image i ON i.img_id = p.img_id
+                {where_clause}
+                """,
+                params,
+            )
+            size_bytes = 0
+            for (img_path,) in cur.fetchall():
+                try:
+                    size_bytes += Path(str(img_path)).stat().st_size
+                except Exception:
+                    continue
+
+            return count, int(size_bytes)
+
+    def export_predictions_zip(self, start_time: str | None = None, end_time: str | None = None, min_confidence: float = 0.7) -> Path:
+        if not self.enabled:
+            raise Exception("Database not enabled")
+
+        start_time = _normalize_datetime_filter(start_time)
+        end_time = _normalize_datetime_filter(end_time, end_of_day=True)
+
+        where_clause = "WHERE p.type_confidence >= %s"
+        params: list[Any] = [min_confidence]
+
+        if start_time:
+            where_clause += " AND i.img_upload_time >= %s"
+            params.append(start_time)
+        if end_time:
+            where_clause += " AND i.img_upload_time <= %s"
+            params.append(end_time)
+
+        with self.connection() as conn:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                f"""
+                SELECT i.img_path, i.img_upload_time, p.ripeness_level, b.b_name
+                FROM prediction p
+                INNER JOIN image i ON i.img_id = p.img_id
+                LEFT JOIN banana_type b ON b.b_id = p.b_id
+                {where_clause}
+                ORDER BY p.p_id DESC
+                """,
+                params,
+            )
+            rows = cur.fetchall()
+
+        temp_dir = Path(tempfile.gettempdir()) / f"banana_export_{uuid.uuid4().hex[:8]}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        for row in rows:
+            try:
+                src_path = Path(str(row["img_path"]))
+                if src_path.exists():
+                    subdir = temp_dir / f"{row['b_name'] or 'unknown'}" / (row["ripeness_level"] or "unknown")
+                    subdir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_path, subdir / src_path.name)
+            except Exception:
+                continue
+
+        zip_base = Path(tempfile.gettempdir()) / f"banana_dataset_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        shutil.make_archive(str(zip_base), "zip", temp_dir)
+        shutil.rmtree(temp_dir)
+        return zip_base.with_suffix(".zip")

@@ -17,9 +17,8 @@ Thumbs.db
 
 # Large datasets and training artifacts
 dataset_train/
-dataset_demo/image/
-data/image/
-data/images/
+dataset_demo/
+data/
 outputs/
 models/
 logs/

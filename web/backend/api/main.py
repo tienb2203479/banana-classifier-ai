@@ -7,10 +7,12 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from io import BytesIO
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 
 from app.core.banana_info import BANANA_TYPE_INFO, DEFAULT_BANANA_INFO
 from app.core.database import DatabaseManager
@@ -111,9 +113,31 @@ def startup_event() -> None:
 
 
 def _validate_upload(file: UploadFile) -> None:
+    """Validate file is a real PNG or JPEG image."""
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Only jpg/jpeg/png files are supported")
+        raise HTTPException(status_code=400, detail="Only PNG/JPEG files are supported")
+    
+    # Verify file is actually a valid image
+    try:
+        content = file.file.read()
+        file.file.seek(0)  # Reset for later reading
+        
+        image = Image.open(BytesIO(content))
+        image.load()  # Verify image data is valid
+        
+        if image.format not in {"JPEG", "PNG"}:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid image format: {image.format}. Only PNG and JPEG are supported."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=400, 
+            detail="File is not a valid image. Please upload a real PNG or JPEG file."
+        )
 
 
 def _save_upload(file: UploadFile) -> Path:

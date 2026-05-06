@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BananaAI Admin - Quản lý thông tin chuối</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: linear-gradient(135deg, #fef9c3 0%, #fff7ed 100%);
+            min-height: 100vh;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
+        }
+
+    </style>
+</head>
+<body class="p-4">
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 flex items-center justify-center text-2xl">
+                        🍌
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-800">BananaAI Admin</h1>
+                        <p class="text-sm text-gray-500">Quản lý thông tin chuối & thu thập dataset</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid lg:grid-cols-5 gap-6">
+            <!-- Sidebar -->
+            <div class="lg:col-span-1">
+            <div class="bg-white rounded-2xl shadow-md p-4 space-y-2 sticky top-4">
+                    <button class="nav-btn w-full text-left px-4 py-3 rounded-lg font-bold text-sm transition" data-section="predictions">
+                        <i class="fas fa-images mr-2"></i> Danh sách ảnh dự đoán
+                    </button>
+                    <button class="nav-btn w-full text-left px-4 py-3 rounded-lg font-bold text-sm transition" data-section="banana-info">
+                        <i class="fas fa-database mr-2"></i> Quản lý thông tin chuối
+                    </button>
+                    <button class="nav-btn w-full text-left px-4 py-3 rounded-lg font-bold text-sm transition" data-section="export">
+                        <i class="fas fa-download mr-2"></i> Xuất dataset
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="lg:col-span-4">
+                <!-- Predictions Section -->
+                <div id="predictions" class="section bg-white rounded-2xl shadow-md p-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-images mr-2"></i> Danh sách ảnh dự đoán</h2>
+                    <div class="mb-3 flex gap-2">
+                        <input id="searchInput" type="text" placeholder="Tìm kiếm loại chuối..." class="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-sm">
+                        <button id="refreshBtn" class="px-4 py-2 bg-yellow-500 text-white rounded-lg font-bold hover:bg-yellow-600 transition">
+                            <i class="fas fa-sync"></i> Làm mới
+                        </button>
+                    </div>
+                    <div class="mb-4 grid md:grid-cols-2 gap-3">
+                        <select id="filterStructure" class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                            <option value="">Lọc theo dạng (tất cả)</option>
+                            <option value="Buồng">Buồng</option>
+                            <option value="Nải">Nải</option>
+                            <option value="Trái">Trái</option>
+                        </select>
+                        <select id="filterRipeness" class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                            <option value="">Lọc theo độ chín (tất cả)</option>
+                            <option value="Xanh">Xanh</option>
+                            <option value="Chín">Chín</option>
+                        </select>
+                    </div>
+                    <div class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label for="predictionsFrom" class="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Từ ngày</label>
+                            <input id="predictionsFrom" type="date" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                        </div>
+                        <div>
+                            <label for="predictionsTo" class="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Đến ngày</label>
+                            <input id="predictionsTo" type="date" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                        </div>
+                    </div>
+                    <div class="mb-4 flex flex-col sm:flex-row gap-2">
+                        <button id="clearPredictionDateFilter" type="button" class="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 text-sm font-bold hover:bg-gray-200 transition">
+                            <i class="fas fa-eraser mr-1"></i> Xóa lọc thời gian
+                        </button>
+                    </div>
+                    <div id="predictionsList" class="space-y-3 max-h-[600px] overflow-y-auto">
+                        <p class="text-gray-400 text-sm">Đang tải...</p>
+                    </div>
+                </div>
+
+                <!-- Banana Info Section -->
+                <div id="banana-info" class="section hidden bg-white rounded-2xl shadow-md p-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-database mr-2"></i> Quản lý thông tin chuối</h2>
+                    <div id="bananaInfoGrid" class="grid gap-5" style="grid-template-columns:minmax(0,1fr);">
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="text-xs font-bold text-gray-700 uppercase tracking-wider">Danh sách loại chuối</div>
+                                <button id="newBananaBtn" type="button" class="px-3 py-2 rounded-lg bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition">+ Thêm chuối mới</button>
+                            </div>
+                            <div id="bananaList" class="space-y-3 max-h-[760px] overflow-y-auto border border-gray-200 rounded-xl p-4 bg-gray-50">
+                                <p class="text-sm text-gray-400">Đang tải danh sách chuối...</p>
+                            </div>
+                        </div>
+                        <form id="bananaForm" class="space-y-2 hidden border border-gray-200 rounded-2xl p-3 bg-white shadow-sm max-h-[760px] overflow-y-auto">
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="text-sm font-bold text-gray-700" id="bananaFormTitle">Chọn một loại chuối để sửa</div>
+                                <button id="deleteBananaBtn" type="button" class="px-3 py-2 rounded-lg bg-red-500 text-white text-sm font-bold hover:bg-red-600 transition hidden">Xóa chuối</button>
+                            </div>
+                            <div id="bananaNutritionSummary" class="rounded-xl border border-amber-200 bg-amber-50 p-4 hidden">
+                                <div class="flex items-center justify-between gap-3 mb-2">
+                                    <div class="text-sm font-bold text-amber-900">Tóm tắt dinh dưỡng</div>
+                                    <div id="bananaNutritionCalories" class="text-xs font-bold text-amber-700"></div>
+                                </div>
+                                <div id="bananaNutritionText" class="text-sm text-amber-950 leading-6"></div>
+                                <div id="bananaNutritionTags" class="mt-3 flex flex-wrap gap-2"></div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="text-sm font-bold text-gray-700">Tên loại</label>
+                                    <input type="text" id="bName" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="VD: Chuối cau">
+                                </div>
+                                <div>
+                                    <label class="text-sm font-bold text-gray-700">Tên khoa học</label>
+                                    <input type="text" id="scientificName" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                                </div>
+                            </div>
+                        <div>
+                            <label class="text-sm font-bold text-gray-700">Mô tả</label>
+                            <textarea id="description" rows="3" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"></textarea>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Xuất xứ</label>
+                                <input type="text" id="origin" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Mức ngọt</label>
+                                <input type="text" id="taste" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Cách dùng</label>
+                                <input type="text" id="recommendedUsage" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Hợp nhất với</label>
+                                <input type="text" id="bestFor" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-sm font-bold text-gray-700">Lưu ý bảo quản</label>
+                            <textarea id="storageTip" rows="2" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"></textarea>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Calo / 100g</label>
+                                <input type="number" id="caloriesPer100g" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Carbs (g)</label>
+                                <input type="number" id="carbsG" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Đường (g)</label>
+                                <input type="number" id="sugarG" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Chất xơ (g)</label>
+                                <input type="number" id="fiberG" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Protein (g)</label>
+                                <input type="number" id="proteinG" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Fat (g)</label>
+                                <input type="number" id="fatG" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Vitamin C (mg)</label>
+                                <input type="number" id="vitaminCMg" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Kali (mg)</label>
+                                <input type="number" id="potassiumMg" step="0.01" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full px-4 py-2 bg-blue-500 text-white rounded-lg font-bold hover:bg-blue-600 transition">
+                            <i class="fas fa-save mr-2"></i> Lưu thay đổi
+                        </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Export Section -->
+                <div id="export" class="section hidden bg-white rounded-2xl shadow-md p-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-download mr-2"></i> Xuất dataset</h2>
+                    <div class="space-y-4">
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <p class="text-sm text-blue-800"><i class="fas fa-info-circle mr-2"></i> Chọn khoảng thời gian để lọc lại ảnh rồi tải dataset theo đúng mốc thời gian đó.</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Từ ngày</label>
+                                <input id="exportFrom" type="date" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                            <div>
+                                <label class="text-sm font-bold text-gray-700">Đến ngày</label>
+                                <input id="exportTo" type="date" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div class="text-sm font-bold text-gray-700">Danh sách ảnh theo thời gian</div>
+                            <button id="reloadExportList" type="button" class="text-xs font-bold text-blue-600 hover:text-blue-800">Tải lại danh sách</button>
+                        </div>
+                        <div id="exportList" class="space-y-2 max-h-[420px] overflow-y-auto border border-gray-200 rounded-xl p-3">
+                            <p class="text-sm text-gray-400">Chọn khoảng thời gian để xem dữ liệu.</p>
+                        </div>
+                        <button id="exportBtn" class="w-full px-4 py-2 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600 transition">
+                            <i class="fas fa-download mr-2"></i> Tải xuống (ZIP)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="detailModal" class="fixed inset-0 z-50 hidden">
+        <div id="detailBackdrop" class="absolute inset-0 bg-black/45 backdrop-blur-[1px]"></div>
+        <div id="detailModalContainer" class="relative z-10 min-h-screen p-4 md:p-8 flex items-center justify-center">
+            <div class="glass rounded-[1.5rem] shadow-2xl overflow-hidden inline-block max-w-[92vw]">
+                <div id="detailModalBody" class="p-2 md:p-3 max-h-[85vh] overflow-y-auto"></div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="mt-12 text-center text-gray-400 text-sm font-medium py-6 border-t border-white/20">
+        © 2026 BananaAI • Powered by EfficientNet-B4 • Mô hình nhận diện chuối đa nhiệm
+    </footer>
+
+    <script src="/assets/admin.js?v=12"></script>
+</body>
+</html>

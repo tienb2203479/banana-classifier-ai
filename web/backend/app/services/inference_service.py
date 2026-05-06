@@ -66,21 +66,31 @@ class InferenceService:
             outputs = self.model(tensor)
 
         predictions: dict[str, dict[str, float | str]] = {}
+        confidences = []
         for head in HEADS:
             probabilities = torch.softmax(outputs[head], dim=1)[0]
             confidence, index = torch.max(probabilities, dim=0)
+            conf_val = float(confidence.item())
+            confidences.append(conf_val)
             predictions[head] = {
                 "label": self.class_specs[head][int(index.item())],
-                "confidence": float(confidence.item()),
+                "confidence": conf_val,
             }
 
-        can_review = any(item["confidence"] < 0.60 for item in predictions.values()) or bool(warnings)
+        # OOD Detection: Kiểm tra nếu không phải ảnh chuối
+        ood_detection = self._detect_out_of_distribution(outputs, predictions, confidences)
+        if ood_detection["is_ood"]:
+            warnings.append(ood_detection["message"])
+
+        can_review = any(item["confidence"] < 0.60 for item in predictions.values()) or bool(warnings) or ood_detection["is_ood"]
         return {
             "predictions": predictions,
             "can_review": can_review,
             "image_quality": quality,
             "image_quality_after_preprocess": post_quality,
             "warnings": warnings,
+            "is_banana": not ood_detection["is_ood"],
+            "ood_score": ood_detection["ood_score"],
             "preprocess_applied": True,
         }
 
@@ -116,4 +126,63 @@ class InferenceService:
             "sharpness_score": sharpness_score,
             "is_dark": brightness_mean < dark_threshold,
             "is_blurry": sharpness_score < blurry_threshold,
+        }
+
+    def _detect_out_of_distribution(self, outputs: dict, predictions: dict, confidences: list) -> dict[str, bool | float | str]:
+        """
+        Phát hiện ảnh không phải chuối (Out-of-Distribution detection).
+        
+        Sử dụng 3 kỹ thuật:
+        1. Confidence threshold: Nếu confidence loại < 0.70 → OOD
+        2. Entropy-based: Nếu entropy cao → Không chắc chắn
+        3. Multi-head consensus: Nếu các head không đồng thuận
+        """
+        species_conf = predictions.get("loai", {}).get("confidence", 0.0)
+        form_conf = predictions.get("dang", {}).get("confidence", 0.0)
+        ripeness_conf = predictions.get("trang_thai", {}).get("confidence", 0.0)
+        
+        # Method 1: Confidence threshold (Species head)
+        OOD_CONFIDENCE_THRESHOLD = 0.65
+        
+        # Method 2: Entropy-based detection
+        entropy_score = 0.0
+        for head in HEADS:
+            if head in outputs:
+                logits = outputs[head]
+                probs = torch.softmax(logits, dim=1)[0]
+                entropy = -torch.sum(probs * torch.log(probs + 1e-10)).item()
+                entropy_score += entropy
+        
+        entropy_score = entropy_score / len(HEADS)
+        OOD_ENTROPY_THRESHOLD = 1.5  # Entropy cao = uncertain
+        
+        # Method 3: Multi-head consensus
+        avg_confidence = (species_conf + form_conf + ripeness_conf) / 3
+        
+        # OOD Detection Logic
+        is_ood = False
+        ood_reason = ""
+        
+        if species_conf < OOD_CONFIDENCE_THRESHOLD:
+            is_ood = True
+            ood_reason = f"Confidence đối với loại chuối thấp ({species_conf:.1%}). Có thể không phải ảnh chuối."
+        elif entropy_score > OOD_ENTROPY_THRESHOLD:
+            is_ood = True
+            ood_reason = f"Mô hình không chắc chắn về kết quả (entropy={entropy_score:.2f}). Vui lòng kiểm tra lại ảnh."
+        elif avg_confidence < 0.70 and species_conf < 0.75:
+            is_ood = True
+            ood_reason = "Ảnh có thể không phải chuối hoặc chất lượng kém. Vui lòng chụp ảnh khác."
+        
+        ood_score = min(
+            1.0,
+            (1.0 - species_conf) * 0.5 +  # 50% từ confidence thấp
+            (entropy_score / 2.0) * 0.5    # 50% từ entropy cao
+        )
+        
+        return {
+            "is_ood": is_ood,
+            "ood_score": ood_score,
+            "message": ood_reason,
+            "species_confidence": species_conf,
+            "entropy_score": entropy_score,
         }

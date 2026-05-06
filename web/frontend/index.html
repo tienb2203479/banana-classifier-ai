@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BananaID Premium - Giao diện nghệ thuật</title>
+    <title>BananaAI Premium - Giao diện nghệ thuật</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -40,9 +41,42 @@
             50% { transform: translateY(-10px); }
             100% { transform: translateY(0px); }
         }
+
+        @keyframes slideInAlert {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes slideOutAlert {
+            from {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+        }
+
+        .alert-enter {
+            animation: slideInAlert 0.3s ease-out forwards;
+        }
+
+        .alert-exit {
+            animation: slideOutAlert 0.3s ease-out forwards;
+        }
     </style>
 </head>
 <body class="p-3 md:p-5">
+
+    <!-- Alert/Toast Notification -->
+    <div id="alertContainer" class="fixed top-4 left-4 right-4 md:left-auto md:right-4 md:w-96 z-50"></div>
 
     <div class="fixed top-[-10%] left-[-10%] w-64 h-64 bg-yellow-200 rounded-full blur-[100px] opacity-50 z-[-1]"></div>
     <div class="fixed bottom-[-10%] right-[-10%] w-96 h-96 bg-orange-200 rounded-full blur-[100px] opacity-50 z-[-1]"></div>
@@ -54,7 +88,7 @@
                     <span class="drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]">🍌</span>
                 </div>
                 <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-gray-800 leading-none">Banana<span class="text-yellow-600 underline decoration-wavy">ID</span></h1>
+                    <h1 class="text-2xl font-bold tracking-tight text-gray-800 leading-none">Banana<span class="text-yellow-600 underline decoration-wavy">AI</span></h1>
                     <p class="text-xs md:text-sm text-gray-500 font-semibold mt-1">Nhận diện chuối đa nhiệm với mô hình EfficientNet-B4</p>
                 </div>
             </div>
@@ -73,8 +107,8 @@
                     <div class="absolute top-0 left-0 w-full h-2 banana-gradient opacity-0 group-hover:opacity-100 transition"></div>
                     <h2 class="text-2xl font-bold text-gray-800 mb-6">Bắt đầu quét</h2>
 
-                    <label for="fileInput" class="border-2 border-dashed border-yellow-200 rounded-[2rem] p-8 md:p-10 text-center flex flex-col items-center gap-4 transition-all hover:border-yellow-400 hover:bg-yellow-50/50 cursor-pointer">
-                        <input id="fileInput" type="file" accept="image/png,image/jpeg" capture="environment" class="hidden" />
+                    <div id="uploadArea" class="border-2 border-dashed border-yellow-200 rounded-[2rem] p-8 md:p-10 text-center flex flex-col items-center gap-4 transition-all hover:border-yellow-400 hover:bg-yellow-50/50 cursor-pointer">
+                        <input id="fileInput" type="file" accept="image/png,image/jpeg" class="hidden" />
                         <img id="previewImage" alt="Preview" class="hidden w-full h-[320px] object-cover rounded-[1.5rem]" />
                         <div id="uploadPrompt" class="space-y-4">
                             <div class="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center floating mx-auto">
@@ -85,7 +119,49 @@
                                 <p class="text-sm text-gray-400 leading-relaxed">Hãy để AI giúp bạn hiểu về <br>chất lượng trái cây</p>
                             </div>
                         </div>
-                    </label>
+                    </div>
+
+                    <!-- File Upload Options Modal - Mobile Only -->
+                    <div id="filePickerModal" class="hidden md:hidden fixed inset-0 bg-black/50 backdrop-blur-md flex items-end z-50">
+                        <div class="w-full bg-gradient-to-br from-yellow-50 via-orange-50 to-yellow-50 rounded-t-[3rem] p-6 space-y-5 animate-in slide-in-from-bottom duration-300">
+                            <div class="flex justify-center mb-2">
+                                <div class="w-12 h-1.5 bg-gray-300 rounded-full"></div>
+                            </div>
+                            
+                            <div class="text-center space-y-1.5">
+                                <h3 class="text-2xl font-bold bg-gradient-to-r from-yellow-600 to-orange-500 bg-clip-text text-transparent">Chọn nguồn ảnh</h3>
+                                <p class="text-sm text-gray-500 font-medium">Bạn muốn lấy ảnh như thế nào?</p>
+                            </div>
+                            
+                            <div class="space-y-3 pt-2">
+                                <button id="cameraBtnOption" type="button" class="w-full flex items-center gap-4 p-5 rounded-[1.8rem] bg-gradient-to-r from-yellow-300 to-amber-300 hover:from-yellow-400 hover:to-amber-400 transition-all shadow-lg hover:shadow-xl active:scale-95">
+                                    <div class="w-14 h-14 rounded-2xl bg-white/80 flex items-center justify-center flex-shrink-0 shadow-md">
+                                        <i class="fas fa-camera text-2xl text-yellow-600"></i>
+                                    </div>
+                                    <div class="text-left flex-1">
+                                        <p class="font-bold text-gray-800 text-lg">Chụp ảnh</p>
+                                        <p class="text-sm text-gray-600 font-medium">Dùng camera thiết bị</p>
+                                    </div>
+                                    <i class="fas fa-chevron-right text-gray-700 text-lg"></i>
+                                </button>
+
+                                <button id="galleryBtnOption" type="button" class="w-full flex items-center gap-4 p-5 rounded-[1.8rem] bg-gradient-to-r from-orange-300 to-orange-400 hover:from-orange-400 hover:to-orange-500 transition-all shadow-lg hover:shadow-xl active:scale-95">
+                                    <div class="w-14 h-14 rounded-2xl bg-white/80 flex items-center justify-center flex-shrink-0 shadow-md">
+                                        <i class="fas fa-images text-2xl text-orange-600"></i>
+                                    </div>
+                                    <div class="text-left flex-1">
+                                        <p class="font-bold text-gray-800 text-lg">Chọn từ máy</p>
+                                        <p class="text-sm text-gray-600 font-medium">Chọn ảnh có sẵn</p>
+                                    </div>
+                                    <i class="fas fa-chevron-right text-gray-700 text-lg"></i>
+                                </button>
+                            </div>
+
+                            <button id="closeFilePickerBtn" type="button" class="w-full py-3.5 rounded-[1.5rem] bg-white/80 border-2 border-gray-200 text-gray-700 font-bold hover:bg-gray-50 transition mt-2">
+                                Hủy
+                            </button>
+                        </div>
+                    </div>
 
                     <div class="mt-4 flex gap-3">
                         <button id="predictBtn" class="flex-1 banana-gradient text-white py-4 rounded-[1.2rem] font-bold shadow-lg hover:shadow-yellow-200/50 transition transform hover:scale-[1.02]" type="button">
@@ -120,12 +196,13 @@
             </div>
             <div id="history" class="mt-4 text-gray-500 font-semibold">Chưa có lịch sử</div>
         </div>
-        <footer class="mt-12 text-center text-gray-400 text-sm font-medium">
-            Thiết kế tối giản cho trải nghiệm tối đa • BananaID 2026
-        </footer>
         </section>
+
+        <footer class="mt-12 text-center text-gray-600 text-sm font-medium py-8 border-t border-gray-200">
+            © 2026 BananaAI • Powered by EfficientNet-B4 • Mô hình nhận diện chuối đa nhiệm
+        </footer>
     </div>
 
-    <script src="/assets/app.js?v=4"></script>
+    <script src="/assets/app.js?v=10"></script>
 </body>
 </html>

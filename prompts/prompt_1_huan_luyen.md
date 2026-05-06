@@ -31,7 +31,7 @@ SEED = 42
 USE_WEIGHTED_LOSS = True
 USE_SAMPLER = False
 
-NUM_WORKERS = min(8, CPU_COUNT)
+NUM_WORKERS = min(4, CPU_COUNT)
 PIN_MEMORY = True
 
 DEVICE = "cuda" if available else "cpu"
@@ -52,20 +52,21 @@ DEVICE = "cuda" if available else "cpu"
 🧪 III) PREPROCESSING (DÙNG CHUNG)
 ==================================================
 
-Train transforms:
-- RandomResizedCrop(INPUT_SIZE)
-- HorizontalFlip
-- ColorJitter
-- RandomRotation(15)
-- RandomGrayscale
-- RandomAutocontrast
-- RandomAdjustSharpness
-- GaussianBlur (optional)
-- Normalize ImageNet
+Train transforms (Data Augmentation - 8 kỹ thuật):
+- RandomResizedCrop(INPUT_SIZE, scale=(0.75, 1.0)) - thu phóng ngẫu nhiên
+- RandomHorizontalFlip - lật ngang
+- RandomRotation(20°) - xoay ±20 độ
+- RandomPerspective (distortion_scale=0.22) - biến dạng phối cảnh
+- RandomAffine (15°, translate 10%) - affine transform
+- ColorJitter (brightness 0.35, contrast 0.35, saturation 0.3, hue 0.08) - thay đổi màu sắc
+- GaussianBlur (kernel 3x3) - làm mờ Gaussian
+- RandomGrayscale (p=0.08) - chuyển xám
+- RandomErasing (p=0.25, scale 0.02-0.12) - xóa ngẫu nhiên
+- Normalize ImageNet (mean/std)
 
 Val/Test:
 - Resize → CenterCrop(INPUT_SIZE)
-- Normalize
+- Normalize ImageNet
 
 ==================================================
 📦 IV) DATASET + DATALOADER
@@ -90,47 +91,65 @@ shared backbone →
     └── fc_trang_thai (2)
 
 ==================================================
-⚙️ VI) TRAINING
+⚙️ VI) TRAINING STRATEGY
 ==================================================
 
 Optimizer:
 - AdamW(lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
 Scheduler:
-- CosineAnnealingLR
+- CosineAnnealingLR (điều chỉnh theo weighted_f1)
 
-Training strategy:
+Training Flow:
 1. Freeze backbone trong FREEZE_BACKBONE_EPOCHS
-2. Sau đó unfreeze toàn bộ
+2. Sau đó unfreeze toàn bộ model
 
-Loss:
-- CrossEntropyLoss
-- Nếu USE_WEIGHTED_LOSS → dùng class weights
+Loss Function:
+- CrossEntropyLoss cho mỗi head
+- Nếu USE_WEIGHTED_LOSS → áp dụng class weights để cân bằng lớp
 
-Total loss:
+Total loss mỗi batch:
 loss = 
     LOSS_WEIGHTS["loai"] * loss_loai +
     LOSS_WEIGHTS["dang"] * loss_dang +
     LOSS_WEIGHTS["trang_thai"] * loss_trang_thai
 
-Early stopping:
-- Stop nếu F1 không cải thiện trong EARLY_STOPPING_PATIENCE
+Early Stopping Strategy:
+- Sau mỗi epoch validation, tính weighted_f1_combined
+- Nếu weighted_f1_combined không cải thiện trong EARLY_STOPPING_PATIENCE epoch → dừng
+- Lưu best checkpoint dựa trên weighted_f1_combined
+- Theo dõi macro_f1 của từng head để log metrics
 
 ==================================================
-📊 VII) METRICS
+📊 VII) METRICS & EARLY STOPPING
 ==================================================
 
-- Accuracy từng head
-- F1 macro + weighted
-- Balanced accuracy
-- Per-class F1
-- Confusion matrix từng head
+Metrics được tính toán từ Confusion Matrix:
+- Accuracy: Tỷ lệ dự đoán đúng tổng thể
+- Precision: Độ chính xác của dự đoán lớp dương
+- Recall: Khả năng phát hiện đầy đủ các mẫu lớp
+- Per-class F1: Trung bình điều hòa Precision & Recall từng lớp
 
-Score tổng:
+F1-Score Variants (được áp dụng cho mỗi head):
+- F1-Macro: Trung bình cộng F1 tất cả lớp (cân bằng cho lớp ít mẫu)
+  F1_macro = (1/N) × Σ F1_i
+- F1-Weighted: Trung bình có trọng số dựa trên số mẫu thực tế (phản ánh phân phối dữ liệu)
+  F1_weighted = Σ (F1_i × support_i) / total_samples
+- Balanced Accuracy: Trung bình Recall tất cả lớp
+
+⭐ METRIC CHÍNH CHO EARLY STOPPING:
+- Tính weighted F1 từng head: loai, dang, trang_thai
+- Tính trung bình: weighted_f1_combined = (wf1_loai + wf1_dang + wf1_trang_thai) / 3
+- Early stopping dựa trên weighted_f1_combined (mục tiêu chính)
+- Theo dõi thêm macro_f1 để đảm bảo mô hình học tốt các lớp ít mẫu
+
+Score tổng (cho thông tin):
 score = 
     0.40 * macro_f1_loai +
     0.35 * macro_f1_dang +
     0.25 * macro_f1_trang_thai
+
+Confusion matrix + per-class metrics được lưu cho mỗi head
 
 ==================================================
 💾 VIII) OUTPUT
